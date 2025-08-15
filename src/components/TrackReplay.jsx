@@ -5,6 +5,8 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const animationRef = useRef(null);
+  const wallClockStartRef = useRef(0); // wall-clock ms when the current segment started
+  const trackStartMsRef = useRef(0); // track time (ms) at the moment the current segment started
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [totalDuration, setTotalDuration] = useState(0);
@@ -203,6 +205,7 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
 
       const trackId = `track-${track.id}`;
       const labelId = `label-${track.id}`;
+      const headId = `head-${track.id}`;
 
       // Create timestamps FIRST from original coordinates (before any processing)
       console.log('Creating timestamps from original coordinates...');
@@ -312,6 +315,44 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
         console.error('Failed to add track layer:', error);
       }
 
+      // Add head marker source at starting point
+      console.log('Adding head source:', headId);
+      try {
+        map.addSource(headId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'Point',
+              coordinates: [coordinates[0][0], coordinates[0][1]],
+            },
+          },
+        });
+        console.log('Head source added successfully');
+      } catch (error) {
+        console.error('Failed to add head source:', error);
+      }
+
+      // Add head marker layer (circle)
+      console.log('Adding head layer:', headId);
+      try {
+        map.addLayer({
+          id: headId,
+          type: 'circle',
+          source: headId,
+          paint: {
+            'circle-radius': 6,
+            'circle-color': track.color,
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#ffffff',
+          },
+        });
+        console.log('Head layer added successfully');
+      } catch (error) {
+        console.error('Failed to add head layer:', error);
+      }
+
       // Add pilot label source
       map.addSource(labelId, {
         type: 'geojson',
@@ -351,6 +392,7 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
       track.labelId = labelId;
       track.coordinates = coordinates;
       track.timestamps = timestamps;
+      track.headId = headId;
 
       console.log('Track processing complete:');
       console.log('  - Track ID:', trackId);
@@ -383,11 +425,17 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
         if (track.labelId && map.getLayer(track.labelId)) {
           map.removeLayer(track.labelId);
         }
+        if (track.headId && map.getLayer(track.headId)) {
+          map.removeLayer(track.headId);
+        }
         if (track.trackId && map.getSource(track.trackId)) {
           map.removeSource(track.trackId);
         }
         if (track.labelId && map.getSource(track.labelId)) {
           map.removeSource(track.labelId);
+        }
+        if (track.headId && map.getSource(track.headId)) {
+          map.removeSource(track.headId);
         }
       });
     };
@@ -396,40 +444,39 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
   // Animation loop
   useEffect(() => {
     if (!mapRef.current) return;
-
-    // if we don't have any duration yet, do nothing
     if (totalDuration <= 0) return;
 
-    // keep a stable start reference so play/pause resumes smoothly
-    let startTime = Date.now() - currentTime * 1000;
+    if (!isPlaying) return;
+
+    // capture start references so speed changes don't jump backward
+    wallClockStartRef.current = Date.now();
+    trackStartMsRef.current = currentTime * 1000;
 
     const animate = () => {
       if (!isPlaying) return;
 
-      const elapsed = (Date.now() - startTime) * playbackSpeed;
-      const newTime = Math.min(elapsed, totalDuration);
+      const elapsedWall = Date.now() - wallClockStartRef.current; // in ms
+      const newTimeMs = Math.min(
+        trackStartMsRef.current + elapsedWall * playbackSpeed,
+        totalDuration
+      );
 
-      setCurrentTime(newTime / 1000);
-      updatePositions(newTime);
+      setCurrentTime(newTimeMs / 1000);
+      updatePositions(newTimeMs);
 
-      if (newTime < totalDuration) {
+      if (newTimeMs < totalDuration) {
         animationRef.current = requestAnimationFrame(animate);
       } else {
         setIsPlaying(false);
       }
     };
 
-    // Only start the raf loop when playing
-    if (isPlaying) {
-      animationRef.current = requestAnimationFrame(animate);
-    }
+    animationRef.current = requestAnimationFrame(animate);
 
     return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
     };
-  }, [isPlaying, playbackSpeed, totalDuration, currentTime]);
+  }, [isPlaying, playbackSpeed, totalDuration]);
 
   // Update pilot positions during replay
   const updatePositions = useCallback(
@@ -476,6 +523,24 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
                 ],
               },
             });
+          }
+
+          // Update head marker position
+          if (track.headId) {
+            const headSource = mapRef.current.getSource(track.headId);
+            if (headSource) {
+              headSource.setData({
+                type: 'Feature',
+                properties: {},
+                geometry: {
+                  type: 'Point',
+                  coordinates: [
+                    coordinates[currentIndex][0],
+                    coordinates[currentIndex][1],
+                  ],
+                },
+              });
+            }
           }
 
           // Update line to show progress (slice to current index)
@@ -555,6 +620,21 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
     // When seeking, pause animation and update instantly
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
     updatePositions(newTime);
+    // If currently playing, re-anchor the timing so playback continues smoothly
+    if (isPlaying) {
+      wallClockStartRef.current = Date.now();
+      trackStartMsRef.current = newTime;
+      animationRef.current = requestAnimationFrame(() => {
+        // kick the loop once; the effect will continue handling frames
+        const elapsedWall = Date.now() - wallClockStartRef.current;
+        const newTimeMs = Math.min(
+          trackStartMsRef.current + elapsedWall * playbackSpeed,
+          totalDuration
+        );
+        setCurrentTime(newTimeMs / 1000);
+        updatePositions(newTimeMs);
+      });
+    }
   };
 
   const formatTime = (seconds) => {
