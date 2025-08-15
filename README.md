@@ -1,26 +1,27 @@
 # GlideTrax - 3D GPS Track Replay
 
 A modern web application that creates 3D replays of GPS tracklogs from IGC files. Built with React, MapLibre GL, deck.gl, and Tailwind CSS.
+[Demo available](https://octopus-app-7nwzz.ondigitalocean.app)
+<p>
+<img width="600" alt="image" src="https://github.com/user-attachments/assets/aa0237db-6b04-40f0-8898-c14d8026a97b" />
+<img width="600" alt="image" src="https://github.com/user-attachments/assets/6f9f1114-4d10-4fa8-b5e3-e0cfeb2dde0d" />
+</p>p>
+
 
 ## Features
 
 - **File Upload**: Drag & drop or browse for IGC files
 - **IGC Parsing**: Extracts GPS coordinates, altitude, and pilot names
 - **3D Tracks**: True 3D flight paths rendered with deck.gl
-- **3D Terrain**: MapLibre GL terrain extrusion using a free Terrarium DEM
 - **Multi-Track Support**: Upload and replay multiple tracks simultaneously
 - **Editable Pilot Names**: Edit pilot names extracted from files or add custom ones
 - **Replay Controls**: Play, pause, reset, and seek through tracks
 - **Speed Control**: Adjustable playback speed from 0.5x to 10x
 - **Mobile Friendly**: Responsive design that works on all devices
-- **Real-time Tracking**: Pilot names displayed above current positions during replay
 
 ## Supported Formats
 
-- **IGC (.igc)**: International Gliding Commission format
-  - Extracts GPS coordinates (latitude/longitude)
-  - Parses altitude data (GPS and pressure)
-  - Reads pilot name from `HFPLTPILOTINCHARGE` header
+- .IGC
 
 ## Installation
 
@@ -79,30 +80,6 @@ A modern web application that creates 3D replays of GPS tracklogs from IGC files
 - **Styling**: Tailwind CSS for responsive design
 - **Build Tool**: Vite for fast development and building
 
-### IGC Parsing
-
-The app parses IGC B-records to extract:
-
-- **Time**: HHMMSS format converted to timestamps
-- **Coordinates**: DDMMmmm format converted to decimal degrees
-- **Altitude**: GPS altitude (preferred) or pressure altitude
-- **Pilot Name**: Extracted from HFPLTPILOTINCHARGE header
-
-### Performance Features
-
-- Efficient coordinate parsing and storage
-- Optimized 3D rendering using deck.gl over MapLibre
-- Responsive UI that works on mobile devices
-- Memory-efficient track management
-
-### Data Sources (Free)
-
-- **Base Map**: OpenStreetMap raster tiles (`https://tile.openstreetmap.org/{z}/{x}/{y}.png`)
-- **Elevation DEM**: Mapzen Terrarium tiles (TMS) served from AWS S3:
-  - `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png`
-  - Used via MapLibre `raster-dem` source with `encoding: 'terrarium'`, enabling true 3D terrain with `style.terrain`
-- **Glyphs**: Stadia Maps public glyphs (`https://tiles.stadiamaps.com/fonts/{fontstack}/{range}.pbf`) for text rendering
-- No API keys required
 
 ## Development
 
@@ -126,18 +103,6 @@ src/
 └── index.css           # Global styles
 ```
 
-### Adding New Features
-
-- **File Formats**: Extend `igcParser.js` for additional formats
-- **3D Features**: Add new deck.gl layers in `TrackReplay.jsx`
-- **UI Components**: Create new components in the `components/` directory
-
-## Browser Support
-
-- **Modern Browsers**: Chrome, Firefox, Safari, Edge (latest versions)
-- **Mobile**: iOS Safari, Chrome Mobile, Samsung Internet
-- **Requirements**: WebGL support for 3D rendering
-
 ## License
 
 MIT License - see LICENSE file for details
@@ -150,18 +115,4 @@ MIT License - see LICENSE file for details
 4. Test thoroughly
 5. Submit a pull request
 
-## Future Enhancements
 
-- **Video Export**: Save replays as video files
-- **Performance Optimization**: Handle very long tracks efficiently
-- **Additional Formats**: Support for GPX, KML, and other GPS formats
-- **Advanced Analytics**: Track statistics and performance metrics
-- **Social Features**: Share and compare tracks with other pilots
-
-## Support
-
-For issues, questions, or feature requests, please open an issue on GitHub.
-
----
-
-**Note**: This application requires an internet connection to load terrain DEM tiles and base map tiles.
