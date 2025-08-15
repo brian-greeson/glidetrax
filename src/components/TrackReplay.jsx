@@ -1,9 +1,12 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import maplibregl from 'maplibre-gl';
+import { MapboxOverlay } from '@deck.gl/mapbox';
+import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 
 const TrackReplay = ({ tracks, onBackToUpload }) => {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
+  const deckOverlayRef = useRef(null);
   const animationRef = useRef(null);
   const wallClockStartRef = useRef(0); // wall-clock ms when the current segment started
   const trackStartMsRef = useRef(0); // track time (ms) at the moment the current segment started
@@ -47,6 +50,7 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
       zoom: 2,
       pitch: 45,
       bearing: 0,
+      maxPitch: 85,
     });
 
     // Add navigation controls
@@ -70,12 +74,25 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
           );
         }
       }
+
+      // Initialize Deck.gl overlay for true 3D rendering using altitude (z)
+      if (!deckOverlayRef.current) {
+        const overlay = new MapboxOverlay({ interleaved: true, layers: [] });
+        map.addControl(overlay);
+        deckOverlayRef.current = overlay;
+      }
     });
 
     mapRef.current = map;
 
     return () => {
       if (mapRef.current) {
+        if (deckOverlayRef.current) {
+          try {
+            mapRef.current.removeControl(deckOverlayRef.current);
+          } catch (_) {}
+          deckOverlayRef.current = null;
+        }
         mapRef.current.remove();
         mapRef.current = null;
       }
@@ -255,7 +272,7 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
         );
       }
 
-      // Create track line coordinates
+      // Create track line coordinates (3D: [lon, lat, altitude])
       console.log('Filtering coordinates...');
       const coordinates = track.coordinates
         .filter(
@@ -264,7 +281,7 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
             typeof coord.longitude === 'number' &&
             typeof coord.latitude === 'number'
         )
-        .map((coord) => [coord.longitude, coord.latitude]);
+        .map((coord) => [coord.longitude, coord.latitude, coord.altitude ?? 0]);
 
       console.log('Filtered coordinates count:', coordinates.length);
       if (coordinates.length > 0) {
@@ -274,118 +291,18 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
 
       if (coordinates.length === 0) return;
 
-      // Add track line source (start with first point so playback can grow the line)
-      console.log('Adding track source:', trackId);
-      try {
-        map.addSource(trackId, {
-          type: 'geojson',
-          data: {
-            type: 'Feature',
-            properties: {},
-            geometry: {
-              type: 'LineString',
-              coordinates: coordinates.slice(0, 1),
-            },
-          },
-        });
-        console.log('Track source added successfully');
-      } catch (error) {
-        console.error('Failed to add track source:', error);
-      }
+      // Deck.gl will handle 3D rendering; skip adding MapLibre 2D line source
+      console.log('Skipping MapLibre line source. Using deck.gl overlay.');
 
-      // Add track line layer
-      console.log('Adding track layer:', trackId);
-      try {
-        map.addLayer({
-          id: trackId,
-          type: 'line',
-          source: trackId,
-          layout: {
-            'line-join': 'round',
-            'line-cap': 'round',
-          },
-          paint: {
-            'line-color': track.color,
-            'line-width': 3,
-            'line-opacity': 0.8,
-          },
-        });
-        console.log('Track layer added successfully');
-      } catch (error) {
-        console.error('Failed to add track layer:', error);
-      }
+      // Skip adding MapLibre 2D line layer
 
-      // Add head marker source at starting point
-      console.log('Adding head source:', headId);
-      try {
-        map.addSource(headId, {
-          type: 'geojson',
-          data: {
-            type: 'Feature',
-            properties: {},
-            geometry: {
-              type: 'Point',
-              coordinates: [coordinates[0][0], coordinates[0][1]],
-            },
-          },
-        });
-        console.log('Head source added successfully');
-      } catch (error) {
-        console.error('Failed to add head source:', error);
-      }
+      // Skip adding MapLibre 2D head source; deck.gl will render a 3D dot
 
-      // Add head marker layer (circle)
-      console.log('Adding head layer:', headId);
-      try {
-        map.addLayer({
-          id: headId,
-          type: 'circle',
-          source: headId,
-          paint: {
-            'circle-radius': 6,
-            'circle-color': track.color,
-            'circle-stroke-width': 2,
-            'circle-stroke-color': '#ffffff',
-          },
-        });
-        console.log('Head layer added successfully');
-      } catch (error) {
-        console.error('Failed to add head layer:', error);
-      }
+      // Skip adding MapLibre 2D head layer
 
-      // Add pilot label source
-      map.addSource(labelId, {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          properties: {
-            pilotName: track.pilotName,
-          },
-          geometry: {
-            type: 'Point',
-            coordinates: [coordinates[0][0], coordinates[0][1]],
-          },
-        },
-      });
+      // Skip adding MapLibre label source; deck.gl TextLayer will be used
 
-      // Add pilot label layer
-      map.addLayer({
-        id: labelId,
-        type: 'symbol',
-        source: labelId,
-        layout: {
-          'text-field': track.pilotName,
-          'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
-          'text-size': 14,
-          'text-offset': [0, -2],
-          'text-anchor': 'bottom',
-        },
-        paint: {
-          'text-color': '#ffffff',
-          'text-halo-color': '#000000',
-          'text-halo-width': 2,
-        },
-      });
+      // Skip adding MapLibre symbol layer
 
       // Store reference for animation
       track.trackId = trackId;
@@ -415,6 +332,13 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
     });
     console.log('Final max duration:', maxDuration, 'ms');
     setTotalDuration(maxDuration);
+
+    // Render initial state on overlay
+    try {
+      updatePositions(0);
+    } catch (e) {
+      console.error('Failed initial overlay render', e);
+    }
 
     // Cleanup function
     return () => {
@@ -483,6 +407,7 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
     (elapsedTime) => {
       if (!mapRef.current) return;
 
+      const deckLayers = [];
       tracks.forEach((track) => {
         const { coordinates, timestamps, labelId, trackId } = track;
 
@@ -507,54 +432,53 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
         }
 
         if (coordinates[currentIndex]) {
-          // Update label position
-          const labelSource = mapRef.current.getSource(labelId);
-          if (labelSource) {
-            labelSource.setData({
-              type: 'Feature',
-              properties: {
-                pilotName: track.pilotName,
-              },
-              geometry: {
-                type: 'Point',
-                coordinates: [
-                  coordinates[currentIndex][0],
-                  coordinates[currentIndex][1],
-                ],
-              },
-            });
-          }
+          const pathPositions = coordinates.slice(0, currentIndex + 1);
+          const hex = track.color.replace('#', '');
+          const r = parseInt(hex.substring(0, 2), 16) || 255;
+          const g = parseInt(hex.substring(2, 4), 16) || 0;
+          const b = parseInt(hex.substring(4, 6), 16) || 0;
 
-          // Update head marker position
-          if (track.headId) {
-            const headSource = mapRef.current.getSource(track.headId);
-            if (headSource) {
-              headSource.setData({
-                type: 'Feature',
-                properties: {},
-                geometry: {
-                  type: 'Point',
-                  coordinates: [
-                    coordinates[currentIndex][0],
-                    coordinates[currentIndex][1],
-                  ],
-                },
-              });
-            }
-          }
+          deckLayers.push(
+            new PathLayer({
+              id: `${trackId}-path`,
+              data: [{ path: pathPositions }],
+              getPath: (d) => d.path,
+              getColor: [r, g, b, 200],
+              widthUnits: 'pixels',
+              getWidth: 3,
+            })
+          );
 
-          // Update line to show progress (slice to current index)
-          const lineSource = mapRef.current.getSource(trackId);
-          if (lineSource) {
-            lineSource.setData({
-              type: 'Feature',
-              properties: {},
-              geometry: {
-                type: 'LineString',
-                coordinates: coordinates.slice(0, currentIndex + 1),
-              },
-            });
-          }
+          deckLayers.push(
+            new ScatterplotLayer({
+              id: `${trackId}-head`,
+              data: [coordinates[currentIndex]],
+              getPosition: (d) => d,
+              getFillColor: [r, g, b, 255],
+              radiusUnits: 'pixels',
+              getRadius: 6,
+              stroked: true,
+              getLineColor: [255, 255, 255, 255],
+              lineWidthUnits: 'pixels',
+              getLineWidth: 2,
+            })
+          );
+
+          deckLayers.push(
+            new TextLayer({
+              id: `${trackId}-label`,
+              data: [
+                { position: coordinates[currentIndex], text: track.pilotName },
+              ],
+              getPosition: (d) => d.position,
+              getText: (d) => d.text,
+              getSize: 14,
+              getColor: [255, 255, 255, 255],
+              background: true,
+              getBackgroundColor: [0, 0, 0, 180],
+              billboard: true,
+            })
+          );
 
           // Update current position for display
           setCurrentPosition((prev) => ({
@@ -567,6 +491,10 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
           }));
         }
       });
+
+      if (deckOverlayRef.current) {
+        deckOverlayRef.current.setProps({ layers: deckLayers });
+      }
     },
     [tracks]
   );
@@ -590,25 +518,8 @@ const TrackReplay = ({ tracks, onBackToUpload }) => {
       cancelAnimationFrame(animationRef.current);
     }
 
-    // Reset pilot positions to start
-    tracks.forEach((track) => {
-      if (track.labelId && track.coordinates && track.coordinates[0]) {
-        const source = mapRef.current?.getSource(track.labelId);
-        if (source) {
-          source.setData({
-            type: 'Feature',
-            properties: {
-              pilotName: track.pilotName,
-            },
-            geometry: {
-              type: 'Point',
-              coordinates: [track.coordinates[0][0], track.coordinates[0][1]],
-            },
-          });
-        }
-      }
-    });
-
+    // Reset deck overlay to start
+    updatePositions(0);
     setCurrentPosition({});
   };
 
